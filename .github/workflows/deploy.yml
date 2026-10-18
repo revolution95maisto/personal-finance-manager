@@ -1,0 +1,125 @@
+
+name: Verifica e pubblicazione
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Importa il progetto da un file ZIP (solo se presente nella radice)
+        run: |
+          ZIP=$(ls -1 *.zip 2>/dev/null | head -n 1 || true)
+          if [ -z "$ZIP" ]; then
+            echo "Nessun ZIP da importare."
+            exit 0
+          fi
+          echo "Importo $ZIP"
+          rm -rf /tmp/zipcontent && mkdir /tmp/zipcontent
+          unzip -q "$ZIP" -d /tmp/zipcontent
+          PKG=$(find /tmp/zipcontent -maxdepth 3 -name package.json -not -path '*/node_modules/*' | head -n 1)
+          if [ -z "$PKG" ]; then
+            echo "::error::package.json non trovato nello ZIP"
+            exit 1
+          fi
+          SRC=$(dirname "$PKG")
+          rm -rf "$SRC/.github" "$SRC/.git" "$SRC/node_modules"
+          rm -rf src public scripts supabase docs
+          cp -a "$SRC"/. .
+          rm -f "$ZIP"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Importa il progetto da $ZIP"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Installa le dipendenze
+        run: npm install --no-audit --no-fund
+
+      - name: Controllo dei tipi (TypeScript)
+        run: npm run typecheck
+
+      - name: Test automatici (Vitest)
+        run: npm test
+
+      - name: Database - migrazione, verifica e test RLS su Postgres 16 (Supabase simulato)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          P="psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d postgres"
+          $P -q -f supabase/ci/00_supabase_stub.sql
+          $P -q -f supabase/migrations/20261017000000_init_personal_finance.sql
+          $P -tA -f supabase/verify.sql | tee /tmp/verify.out
+          if [ "$(grep -c '|t$' /tmp/verify.out)" != "5" ] || grep -q '|f$' /tmp/verify.out; then
+            echo "::error::verify.sql: almeno un controllo non è superato"
+            exit 1
+          fi
+          $P -f supabase/tests/security_and_integrity.sql | tee /tmp/sectest.out
+          grep -q "OK: tutti i test" /tmp/sectest.out
+
+      - name: Controlla le variabili di Supabase
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "::error::Mancano le variabili Supabase."
+            exit 1
+          fi
+          case "$VITE_SUPABASE_PUBLISHABLE_KEY" in
+            sb_secret_*) echo "::error::Serve la Publishable key."; exit 1 ;;
+          esac
+
+      - name: Build
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: npm run build
+
+      - name: Controlla le chiavi nel pacchetto pubblicato
+        run: npm run check:secrets
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+        
