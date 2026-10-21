@@ -44,6 +44,19 @@ describe('migrazione SQL (analisi statica)', () => {
     expect(sql).toMatch(/transactions_account_fk[\s\S]*?on delete cascade/)
   })
 
+  it('la migrazione di ripristino ricrea la stessa vista, senza toccare altro', () => {
+    const fix = readFileSync(
+      new URL('../../supabase/migrations/20261018000000_ripristina_vista_account_balances.sql', import.meta.url),
+      'utf8',
+    ).replace(/--.*$/gm, '')
+    const norm = (t: string) => t.replace(/\s+/g, ' ').trim()
+    const viewOf = (t: string) => norm(t.match(/create (?:or replace )?view public\.account_balances[\s\S]*?group by a\.id;/)![0])
+    expect(viewOf(fix)).toBe(viewOf(sql).replace('create view', 'create or replace view'))
+    expect(fix).toMatch(/security_invoker = true/)
+    expect(fix).toMatch(/revoke all on public\.account_balances from anon, authenticated, public/)
+    expect(fix).not.toMatch(/\b(create table|drop |alter table|create policy|create function)\b/i)
+  })
+
   it('gli importi sono interi positivi in centesimi', () => {
     expect(sql).toMatch(/amount_cents bigint not null/)
     expect(sql).toMatch(/transactions_amount_range check \(amount_cents between 1 and/)

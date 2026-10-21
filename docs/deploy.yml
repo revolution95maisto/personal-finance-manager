@@ -80,6 +80,9 @@ jobs:
           P="psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d postgres"
           $P -q -f supabase/ci/00_supabase_stub.sql
           $P -q -f supabase/migrations/20261017000000_init_personal_finance.sql
+          # la migrazione di ripristino deve poter essere rieseguita senza danni: la lancio due volte
+          $P -q -f supabase/migrations/20261018000000_ripristina_vista_account_balances.sql
+          $P -q -f supabase/migrations/20261018000000_ripristina_vista_account_balances.sql
           $P -tA -f supabase/verify.sql | tee /tmp/verify.out
           if [ "$(grep -c '|t$' /tmp/verify.out)" != "5" ] || grep -q '|f$' /tmp/verify.out; then
             echo "::error::verify.sql: almeno un controllo non è superato"

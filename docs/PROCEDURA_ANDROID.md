@@ -70,6 +70,7 @@ Quando ti do un nuovo ZIP: **Add file → Upload files** nel repository, carica 
 
 ## Problemi frequenti
 
+- *L'app dice "Could not find the table 'public.account_balances' in the schema cache"*: esegui `supabase/00_diagnosi_account_balances.sql` nel SQL Editor del progetto il cui URL è in `VITE_SUPABASE_URL` (stesso codice progetto!). Se la vista risulta MANCANTE ma le tre tabelle ci sono, esegui `supabase/migrations/20261018000000_ripristina_vista_account_balances.sql`. Se mancano anche le tabelle, esegui prima la migrazione iniziale. Se la vista c'è, basta rieseguire il file di ripristino: ricarica anche la cache dell'API.
 - *Actions rosso su "Controlla le variabili"*: mancano o hanno il nome sbagliato le due Variables (punto 1.3).
 - *L'app mostra "Configurazione necessaria"*: la variabile contiene un valore sbagliato o una chiave segreta; correggi la variabile e rilancia il workflow (Actions → Run workflow).
 - *Pagina bianca dopo un aggiornamento*: chiudi e riapri l'app una volta (aggiornamento della PWA).
